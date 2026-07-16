@@ -140,6 +140,7 @@ metavars
 miscompiles
 mult
 multibytecodec
+mycmp
 mystricmp
 mystrnicmp
 nameobj

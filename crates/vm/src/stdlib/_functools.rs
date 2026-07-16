@@ -3,17 +3,17 @@ pub(crate) use _functools::module_def;
 #[pymodule]
 mod _functools {
     use crate::{
-        Py, PyObjectRef, PyPayload, PyRef, PyResult, VirtualMachine,
+        Py, PyObject, PyObjectRef, PyPayload, PyRef, PyResult, VirtualMachine,
         builtins::{
             PyBoundMethod, PyDict, PyDictRef, PyGenericAlias, PyTuple, PyType, PyTypeRef, object,
         },
         common::lock::PyRwLock,
-        function::{FuncArgs, KwArgs, OptionalOption, PySetterValue},
+        function::{Either, FuncArgs, KwArgs, OptionalOption, PyComparisonValue, PySetterValue},
         object::AsObject,
         protocol::PyIter,
         pyclass,
         recursion::ReprGuard,
-        types::{Callable, Constructor, GetDescriptor, Representable},
+        types::{Callable, Comparable, Constructor, GetDescriptor, PyComparisonOp, Representable},
     };
     use indexmap::IndexMap;
     use rustpython_common::wtf8::Wtf8Buf;
@@ -525,6 +525,118 @@ mod _functools {
             } else {
                 Ok(Wtf8Buf::from("..."))
             }
+        }
+    }
+
+    #[derive(FromArgs)]
+    pub(super) struct CmpToKeyArgs {
+        #[pyarg(any)]
+        mycmp: PyObjectRef,
+    }
+
+    #[pyfunction]
+    fn cmp_to_key(args: CmpToKeyArgs) -> PyKeyWrapper {
+        PyKeyWrapper {
+            cmp: args.mycmp,
+            obj: PyRwLock::new(None),
+        }
+    }
+
+    #[pyattr]
+    #[pyclass(name = "KeyWrapper", module = "functools", unhashable = true)]
+    #[derive(Debug, PyPayload)]
+    pub(super) struct PyKeyWrapper {
+        cmp: PyObjectRef,
+        obj: PyRwLock<Option<PyObjectRef>>,
+    }
+
+    #[derive(FromArgs)]
+    pub(super) struct KeyWrapperCallArgs {
+        #[pyarg(any)]
+        obj: PyObjectRef,
+    }
+
+    #[pyclass(with(Callable, Comparable), flags(DISALLOW_INSTANTIATION))]
+    impl PyKeyWrapper {
+        #[pymember]
+        fn obj(vm: &VirtualMachine, zelf: PyObjectRef) -> PyResult {
+            let zelf: &Py<Self> = zelf.try_to_value(vm)?;
+            Ok(vm.unwrap_or_none(zelf.obj.read().clone()))
+        }
+
+        #[pymember(setter)]
+        fn set_obj(vm: &VirtualMachine, zelf: PyObjectRef, value: PySetterValue) -> PyResult<()> {
+            let zelf: &Py<Self> = zelf.try_to_value(vm)?;
+            *zelf.obj.write() = match value {
+                PySetterValue::Assign(value) => Some(value),
+                PySetterValue::Delete => None,
+            };
+            Ok(())
+        }
+
+        #[pygetset]
+        fn __text_signature__(&self) -> &'static str {
+            "(obj)"
+        }
+    }
+
+    impl Callable for PyKeyWrapper {
+        type Args = KeyWrapperCallArgs;
+
+        fn call(zelf: &Py<Self>, args: Self::Args, vm: &VirtualMachine) -> PyResult {
+            Ok(Self {
+                cmp: zelf.cmp.clone(),
+                obj: PyRwLock::new(Some(args.obj)),
+            }
+            .into_pyobject(vm))
+        }
+    }
+
+    impl PyKeyWrapper {
+        fn richcompare(
+            zelf: &Py<Self>,
+            other: &PyObject,
+            op: PyComparisonOp,
+            vm: &VirtualMachine,
+        ) -> PyResult {
+            let Some(other) = other.downcast_ref::<Self>() else {
+                return Err(vm.new_type_error("other argument must be K instance"));
+            };
+            let (x, y) = (zelf.obj.read().clone(), other.obj.read().clone());
+            let (Some(x), Some(y)) = (x, y) else {
+                return Err(vm.new_attribute_error("object"));
+            };
+            let res = zelf.cmp.call((x, y), vm)?;
+            let zero: PyObjectRef = vm.ctx.new_int(0).into();
+            res.rich_compare(zero, op, vm)
+        }
+    }
+
+    impl Comparable for PyKeyWrapper {
+        fn slot_richcompare(
+            zelf: &PyObject,
+            other: &PyObject,
+            op: PyComparisonOp,
+            vm: &VirtualMachine,
+        ) -> PyResult<Either<PyObjectRef, PyComparisonValue>> {
+            let zelf = zelf.downcast_ref::<Self>().ok_or_else(|| {
+                vm.new_type_error(format!(
+                    "unexpected payload for {}",
+                    op.method_name(&vm.ctx).as_str()
+                ))
+            })?;
+            Self::richcompare(zelf, other, op, vm).map(Either::A)
+        }
+
+        fn cmp(
+            zelf: &Py<Self>,
+            other: &PyObject,
+            op: PyComparisonOp,
+            vm: &VirtualMachine,
+        ) -> PyResult<PyComparisonValue> {
+            Self::richcompare(zelf, other, op, vm)?
+                .try_to_bool(vm)
+                .map(PyComparisonValue::Implemented)
         }
     }
 }

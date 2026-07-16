@@ -1249,34 +1249,6 @@ class TestCmpToKeyC(TestCmpToKey, unittest.TestCase):
     def test_cmp_to_signature(self):
         return super().test_cmp_to_signature()
 
-    @unittest.expectedFailure  # TODO: RUSTPYTHON; TypeError: cmp_to_key() got multiple values for argument 'mycmp'
-    def test_cmp_to_key_arguments(self):
-        return super().test_cmp_to_key_arguments()
-
-    @unittest.expectedFailure  # TODO: RUSTPYTHON; TypeError: cmp_to_key() got multiple values for argument 'mycmp'
-    def test_obj_field(self):
-        return super().test_obj_field()
-
-    @unittest.expectedFailure  # TODO: RUSTPYTHON; TypeError: cmp_to_key() takes 1 positional argument but 2 were given
-    def test_bad_cmp(self):
-        return super().test_bad_cmp()
-
-    @unittest.expectedFailure  # TODO: RUSTPYTHON; TypeError: cmp_to_key() takes 1 positional argument but 2 were given
-    def test_cmp_to_key(self):
-        return super().test_cmp_to_key()
-
-    @unittest.expectedFailure  # TODO: RUSTPYTHON; TypeError: cmp_to_key() takes 1 positional argument but 2 were given
-    def test_hash(self):
-        return super().test_hash()
-
-    @unittest.expectedFailure  # TODO: RUSTPYTHON; TypeError: cmp_to_key() takes 1 positional argument but 2 were given
-    def test_sort_int(self):
-        return super().test_sort_int()
-
-    @unittest.expectedFailure  # TODO: RUSTPYTHON; TypeError: cmp_to_key() takes 1 positional argument but 2 were given
-    def test_sort_int_str(self):
-        return super().test_sort_int_str()
-
 
 class TestCmpToKeyPy(TestCmpToKey, unittest.TestCase):
     cmp_to_key = staticmethod(py_functools.cmp_to_key)
