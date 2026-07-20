@@ -13,7 +13,6 @@ use crate::{
     class::PyClassImpl,
     convert::ToPyObject,
     function::{ArgSize, FuncArgs, OptionalArg, PyComparisonValue},
-    iter::PyExactSizeIterator,
     protocol::{PyIterReturn, PyMappingMethods, PySequenceMethods},
     recursion::ReprGuard,
     sequence::{MutObjectSequenceOp, OptionalRangeArgs, SequenceExt, SequenceMutExt},
@@ -576,11 +575,40 @@ impl Comparable for PyList {
             return Ok(res.into());
         }
         let other = class_or_notimplemented!(Self, other);
-        let a = &*zelf.borrow_vec();
-        let b = &*other.borrow_vec();
-        a.iter()
-            .richcompare(b.iter(), op, vm)
-            .map(PyComparisonValue::Implemented)
+
+        let mut a_len = zelf.__len__();
+        let mut b_len = other.__len__();
+        if matches!(op, PyComparisonOp::Eq | PyComparisonOp::Ne) && a_len != b_len {
+            return Ok(PyComparisonValue::Implemented(op == PyComparisonOp::Ne));
+        }
+
+        // Comparing may mutate the list (e.g. .clear()), so clone the item
+        // out under a short-lived lock rather than holding a borrow (bpo-38588, gh-120298).
+        let mut i = 0;
+        let differing = loop {
+            if i >= a_len || i >= b_len {
+                break None;
+            }
+            let a_item = zelf.borrow_vec()[i].clone();
+            let b_item = other.borrow_vec()[i].clone();
+            let eq = vm.identical_or_equal(&a_item, &b_item)?;
+            a_len = zelf.__len__();
+            b_len = other.__len__();
+            if !eq {
+                break Some((a_item, b_item));
+            }
+            i += 1;
+        };
+
+        let value = match differing {
+            Some((a_item, b_item)) if i < a_len && i < b_len => match op {
+                PyComparisonOp::Eq => false,
+                PyComparisonOp::Ne => true,
+                _ => a_item.rich_compare_bool(&b_item, op, vm)?,
+            },
+            _ => op.eval_ord(a_len.cmp(&b_len)),
+        };
+        Ok(PyComparisonValue::Implemented(value))
     }
 }
 
